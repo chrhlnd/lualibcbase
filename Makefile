@@ -13,7 +13,7 @@ objs:=$(patsubst %.c, %.o, $(sources))
 	$(CC) $(OPTS) $(COPTS) $(LIBDIR) $(INCLUDE) $< -o $@
 
 libcbase.so: $(objs)
-	$(CC) $(OPTS) $(LOPTS) $(LIBDIR) $(INCLUDE) $(LIBS) $(objs) -o $@ $(POKERLIB)
+	$(CC) $(OPTS) $(LOPTS) $(LIBDIR) $(INCLUDE) $(LIBS) $(objs) -o $@
 	#rebase -low_address 100000000 -high_address 100010000 $@
 
 clean:
