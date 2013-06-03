@@ -105,11 +105,13 @@ const char* REMOVE_RESTYPE	= "libcouchconn_removeres";
 const char* FLUSH_RESTYPE	= "libcouchconn_flushres";
 
 #define makeFind( Type, EntryType, FieldCount, FieldEntries, FieldKey ) \
-	static EntryType* findEntry_##EntryType( Type* res, const char * key ) {	\
+	static EntryType* findEntry_##EntryType( Type* res, const char * key, size_t keylen ) {	\
 		int i = 0;													\
 		for ( i = 0; i < res->FieldCount; i++) {					\
-			if (strncmp(res->FieldEntries[i].FieldKey,key,res->FieldEntries[i].n##FieldKey) == 0 ) {\
-				return &res->FieldEntries[i];						\
+			if (keylen == res->FieldEntries[i].n##FieldKey) {		\
+				if (strncmp(res->FieldEntries[i].FieldKey,key,res->FieldEntries[i].n##FieldKey) == 0 ) {\
+					return &res->FieldEntries[i];					\
+				}													\
 			}														\
 		}															\
 	}
@@ -179,7 +181,7 @@ static void get_cb(lcb_t instance,
 	res->responded++;
 	switch (resp->version) {
 		case 0: {
-			GetResEntry *entry = findEntry_GetResEntry( res, resp->v.v0.key );
+			GetResEntry *entry = findEntry_GetResEntry( res, resp->v.v0.key, resp->v.v0.nkey );
 			if (entry) {
 				if (error == LCB_SUCCESS) { 
 					entry->data			= (char*)malloc( resp->v.v0.nbytes );
@@ -196,7 +198,7 @@ static void get_cb(lcb_t instance,
 			}
 			else {
 				// error somehow
-				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",resp->v.v0.nkey,resp->v.v0.key);
+				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",(int)resp->v.v0.nkey,(const char*)resp->v.v0.key);
 			}
 		}
 		break;
@@ -247,7 +249,7 @@ static void store_cb(lcb_t instance,
 	res->responded++;
 	switch (resp->version) {
 		case 0: {
-			StoreResEntry *entry = findEntry_StoreResEntry( res, resp->v.v0.key );
+			StoreResEntry *entry = findEntry_StoreResEntry( res, resp->v.v0.key, resp->v.v0.nkey );
 			if (entry) {
 				if (error == LCB_SUCCESS) { 
 					entry->cas			= resp->v.v0.cas;
@@ -260,7 +262,7 @@ static void store_cb(lcb_t instance,
 			}
 			else {
 				// error somehow
-				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",resp->v.v0.nkey,resp->v.v0.key);
+				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",(int)resp->v.v0.nkey,(const char*)resp->v.v0.key);
 			}
 		}
 		break;
@@ -311,7 +313,7 @@ static void remove_cb(lcb_t instance,
 	res->responded++;
 	switch (resp->version) {
 		case 0: {
-			RemoveResEntry *entry = findEntry_RemoveResEntry( res, resp->v.v0.key );
+			RemoveResEntry *entry = findEntry_RemoveResEntry( res, resp->v.v0.key, resp->v.v0.nkey );
 			if (entry) {
 				entry->responded = 1;
 				if (error == LCB_SUCCESS) { 
@@ -323,7 +325,7 @@ static void remove_cb(lcb_t instance,
 			}
 			else {
 				// error somehow
-				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",resp->v.v0.nkey,resp->v.v0.key);
+				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",(int)resp->v.v0.nkey,(const char*)resp->v.v0.key);
 			}
 		}
 		break;
@@ -367,7 +369,7 @@ static void arith_cb(lcb_t instance,
 	res->responded++;
 	switch (resp->version) {
 		case 0: {
-			ArithResEntry *entry = findEntry_ArithResEntry( res, resp->v.v0.key );
+			ArithResEntry *entry = findEntry_ArithResEntry( res, resp->v.v0.key, resp->v.v0.nkey );
 			if (entry) {
 				if (error == LCB_SUCCESS) { 
 					entry->value		= resp->v.v0.value;
@@ -381,7 +383,7 @@ static void arith_cb(lcb_t instance,
 			}
 			else {
 				// error somehow
-				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",resp->v.v0.nkey,resp->v.v0.key);
+				snprintf(res->error,RES_ERROR_SZ,"Missing response entry for key [%.*s]",(int)resp->v.v0.nkey,(const char*)resp->v.v0.key);
 			}
 		}
 		break;
@@ -1046,7 +1048,7 @@ static int __res_get_iterate(lua_State *L) {
 
 		lua_pushvalue(L, 2); // repush the fn
 		GetResEntry* entry = &pres->entries[i];
-		lua_pushstring(L, entry->key); 			p++;
+		lua_pushlstring(L, entry->key, entry->nkey);	p++;
 		lua_pushlstring(L, entry->data, entry->ndata);	p++;
 		lua_pushinteger(L, entry->flags);		p++;
 		lua_pushinteger(L, entry->cas);			p++;
@@ -1112,7 +1114,7 @@ static int __res_store_iterate(lua_State *L) {
 		lua_Integer test;
 
 		lua_pushvalue(L, 2); // repush the fn
-		lua_pushstring(L, entry->key); 			p++;
+		lua_pushlstring(L, entry->key, entry->nkey);p++;
 		lua_pushinteger(L, entry->cas);			p++;
 		lua_pushinteger(L, entry->op);			p++;
 		lua_pushstring(L, entry->error);		p++;
@@ -1175,7 +1177,7 @@ static int __res_arith_iterate(lua_State *L) {
 	top = lua_gettop(L);
 	if (top < 2) {
 		lua_pushboolean( L, 0 );										// +1
-		lua_pushfstring( L, "Invalid call, need fn(key,value,cas,error,responded,...)" ); // +1
+		lua_pushstring( L, "Invalid call, need fn(key,value,cas,error,responded,...)" ); // +1
 		return 2;
 	}
 
@@ -1187,7 +1189,7 @@ static int __res_arith_iterate(lua_State *L) {
 		lua_Integer test;
 
 		lua_pushvalue(L, 2); // repush the fn
-		lua_pushstring(L, entry->key); 			p++;
+		lua_pushlstring(L, entry->key, entry->nkey);p++;
 		lua_pushinteger(L, entry->value);		p++;
 		lua_pushinteger(L, entry->cas);			p++;
 		lua_pushstring(L, entry->error);		p++;
@@ -1263,7 +1265,7 @@ static int __res_remove_iterate(lua_State *L) {
 		lua_Integer test;
 
 		lua_pushvalue(L, 2); // repush the fn
-		lua_pushstring(L, entry->key); 			p++;
+		lua_pushlstring(L, entry->key,entry->nkey);	p++;
 		lua_pushinteger(L, entry->cas);			p++;
 		lua_pushstring(L, entry->error);		p++;
 		lua_pushboolean(L, entry->responded);	p++;
