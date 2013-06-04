@@ -1049,7 +1049,12 @@ static int __res_get_iterate(lua_State *L) {
 		lua_pushvalue(L, 2); // repush the fn
 		GetResEntry* entry = &pres->entries[i];
 		lua_pushlstring(L, entry->key, entry->nkey);	p++;
-		lua_pushlstring(L, entry->data, entry->ndata);	p++;
+		if (entry->ndata > 0 ) {
+			lua_pushlstring(L, entry->data, entry->ndata);	p++;
+		}
+		else {
+			lua_pushnil(L); p++;
+		}
 		lua_pushinteger(L, entry->flags);		p++;
 		lua_pushinteger(L, entry->cas);			p++;
 		lua_pushstring(L, entry->error);		p++;
