@@ -624,15 +624,22 @@ static int Store_ProcessCmd( lua_State *L, int idx, void* cmdD, int argS, int ar
 	const char* valueN		= NULL;
 	size_t		valueNsz	= 0;
 
-	int			flags		= 0;
-	int			cas			= 0;
-	int			timeout		= 0;
+	int			  flags	  	= 0;
+	lcb_cas_t cas	  		= 0;
+	int			  timeout		= 0;
 
-	typeN	= luaL_checkstring(L, argS);
-	keyN	= luaL_checklstring(L, argS+1, &keyNsz);
-	valueN	= luaL_checklstring(L, argS+2, &valueNsz);
-	flags	= luaL_checkinteger(L, argS+3);
-	cas		= luaL_checkinteger(L, argS+4);
+	typeN	  = luaL_checkstring(L, argS);
+	keyN	  = luaL_checklstring(L, argS+1, &keyNsz);
+	valueN  = luaL_checklstring(L, argS+2, &valueNsz);
+	flags	  = luaL_checkinteger(L, argS+3);
+  
+{ 
+    const char* casStr    = NULL;
+    size_t    casSz   = 0;
+  	casStr = luaL_checklstring(L, argS+4, &casSz);
+    cas = (lcb_cas_t)strtoull( casStr, NULL, 10 ); 
+  }
+  
 	timeout	= luaL_checkinteger(L, argS+5);
 
 	int op = LCB_ADD;
@@ -774,12 +781,19 @@ static int Remove_ProcessCmd( lua_State *L, int idx, void* cmdD, int argS, int a
 	lcb_remove_cmd_t	*pCur = (lcb_remove_cmd_t*)cmdD;
 	RemoveResEntry		*pRes = (RemoveResEntry*)resEleD;
 
-	const char* 	keyN		= NULL;
-	size_t			keyNsz		= 0;
-	lcb_cas_t		cas			= 0;
+	const char  *keyN		= NULL;
+	size_t      keyNsz	= 0;
+	lcb_cas_t   cas			= 0;
 
 	keyN	= luaL_checklstring(L, argS+0, &keyNsz);
-	cas		= luaL_checkinteger(L, argS+1);
+ 
+  { 
+    const char* casStr    = NULL;
+    size_t    casSz   = 0;
+  	casStr = luaL_checklstring(L, argS+1, &casSz);
+    cas = (lcb_cas_t)strtoull( casStr, NULL, 10 ); 
+  }
+
 
 	pRes->key	= strndup( keyN, keyNsz );
 	pRes->nkey	= keyNsz;
@@ -1042,6 +1056,8 @@ static int __res_get_iterate(lua_State *L) {
 
 	// assume stack 2 + is the functon and passthrough arguments
 
+	char cas_str[40] = "";
+
 	for (i = 0; i < pres->nentry; i++) {
 		int p = 0;
 		lua_Integer test;
@@ -1055,8 +1071,12 @@ static int __res_get_iterate(lua_State *L) {
 		else {
 			lua_pushnil(L); p++;
 		}
+
 		lua_pushinteger(L, entry->flags);		p++;
-		lua_pushinteger(L, entry->cas);			p++;
+
+		snprintf(cas_str,40,"%llu",entry->cas);
+		lua_pushstring(L, cas_str); p++;
+
 		lua_pushstring(L, entry->error);		p++;
 		lua_pushboolean(L, entry->responded);	p++;
 		for (q = 3; q <= top; q++) { // repush args
@@ -1111,6 +1131,7 @@ static int __res_store_iterate(lua_State *L) {
 		return 2;
 	}
 
+	char cas_str[40] = "";
 	for (i = 0; i < pRes->nentry; i++) {
 		StoreResEntry* entry = &pRes->entries[i];
 		
@@ -1120,7 +1141,10 @@ static int __res_store_iterate(lua_State *L) {
 
 		lua_pushvalue(L, 2); // repush the fn
 		lua_pushlstring(L, entry->key, entry->nkey);p++;
-		lua_pushinteger(L, entry->cas);			p++;
+
+		snprintf(cas_str,40,"%llu",entry->cas);
+		lua_pushstring(L, cas_str); p++;
+		
 		lua_pushinteger(L, entry->op);			p++;
 		lua_pushstring(L, entry->error);		p++;
 		lua_pushboolean(L, entry->responded);	p++;
@@ -1186,6 +1210,7 @@ static int __res_arith_iterate(lua_State *L) {
 		return 2;
 	}
 
+	char cas_str[40] = "";
 	for (i = 0; i < pRes->nentry; i++) {
 		ArithResEntry* entry = &pRes->entries[i];
 		
@@ -1196,7 +1221,10 @@ static int __res_arith_iterate(lua_State *L) {
 		lua_pushvalue(L, 2); // repush the fn
 		lua_pushlstring(L, entry->key, entry->nkey);p++;
 		lua_pushinteger(L, entry->value);		p++;
-		lua_pushinteger(L, entry->cas);			p++;
+
+		snprintf(cas_str,40,"%llu",entry->cas);
+		lua_pushstring(L, cas_str); p++;
+
 		lua_pushstring(L, entry->error);		p++;
 		lua_pushboolean(L, entry->responded);	p++;
 		for (q = 3; q <= top; q++) { // repush args
@@ -1271,7 +1299,7 @@ static int __res_remove_iterate(lua_State *L) {
 
 		lua_pushvalue(L, 2); // repush the fn
 		lua_pushlstring(L, entry->key,entry->nkey);	p++;
-		lua_pushinteger(L, entry->cas);			p++;
+		lua_pushfstring(L, "%d", entry->cas);			p++;
 		lua_pushstring(L, entry->error);		p++;
 		lua_pushboolean(L, entry->responded);	p++;
 		for (q = 3; q <= top; q++) { // repush args
