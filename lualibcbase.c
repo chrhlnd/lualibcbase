@@ -7,11 +7,15 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <event.h>
 #include <libcouchbase/couchbase.h>
 
 typedef struct {
-	int		valid;
-	lcb_t	inst;
+	int					valid;
+	lcb_t				inst;
+	struct event_base	*evbase;
+	lcb_io_opt_t		ioopts;
+	int					connected;
 } Instance;
 
 #define ENTRY_ERROR_SZ	24
@@ -880,14 +884,39 @@ static int Wait(lua_State *L) {
 		return luaL_error(L, "Invalid instance data");	
 	}
 
-	err = lcb_wait( pinstance->inst );
-	if ( err != LCB_SUCCESS ) {
-		lua_pushboolean( L, 0 );										// +1
-		lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
-		return 2;
+	if (pinstance->evbase == NULL) {
+		err = lcb_wait( pinstance->inst );
+		if ( err != LCB_SUCCESS ) {
+			lua_pushboolean( L, 0 );										// +1
+			lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
+			return 2;
+		}
+		lua_pushboolean( L, 1 );										// +1
+		return 1;
 	}
-	lua_pushboolean( L, 1 );										// +1
-	return 1;
+	else {
+		int eret = event_base_loop( pinstance->evbase, EVLOOP_NONBLOCK);
+		if (eret != 0) {
+			lua_pushboolean( L, 0 );
+			lua_pushstring( L, "event loop error in wait" );
+			return 2;
+		}
+		err = lcb_get_last_error( pinstance->inst );
+		if ( err != LCB_SUCCESS ) {
+			lua_pushboolean( L, 0 );										// +1
+			lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
+			return 2;
+		}
+		lua_pushboolean( L, 1 );										// +1
+		return 1;
+	}
+}
+	
+static void config_cb(lcb_t instance, lcb_configuration_t config) {
+	if (config == LCB_CONFIGURATION_NEW) {
+		Instance* pinstance = (Instance*)lcb_get_cookie(instance);
+		pinstance->connected = 1;
+	}
 }
 
 // connect( host:port, bucket, user /* = NULL */, pass /* = NULL */ )
@@ -903,24 +932,17 @@ static int Connect(lua_State *L) {
 	const char* userStr		= NULL;
 	const char* passStr		= NULL;
 
+	int			nonblock	= 0;
 	int			top			= 0;
 	Instance	*pinstance	= NULL;
 	lcb_error_t	err;
 
+	struct event_base *evbase = NULL;
+
 	struct lcb_create_io_ops_st io_opts;
 	struct lcb_create_st create_options;
 	memset(&create_options, 0, sizeof(create_options));
-
-	io_opts.version		= 0;
-	io_opts.v.v0.type	= LCB_IO_OPS_DEFAULT;
-	io_opts.v.v0.cookie	= NULL;
-	err = lcb_create_io_ops(&create_options.v.v0.io, &io_opts);
-	if (err != LCB_SUCCESS) {
-		lua_pushboolean( L, 0 );											// +1
-		lua_pushfstring( L, "IO Ops failure %s", lcb_strerror(NULL,err));	// +1
-		return 2;
-	}
-
+	
 	top = lua_gettop(L);
 
 	specStr		= luaL_checklstring(L, 1, &specSz);		// host:port
@@ -930,6 +952,24 @@ static int Connect(lua_State *L) {
 	}
 	if (top> 3 ) {
 		passStr = luaL_checklstring(L, 4, &passSz);
+	}
+	nonblock	= lua_toboolean(L, 5);
+
+
+	io_opts.version = 0;
+	if (nonblock) {
+		evbase = event_base_new();
+		io_opts.v.v0.type	= LCB_IO_OPS_LIBEVENT;
+		io_opts.v.v0.cookie	= evbase;
+	}
+	else {
+		io_opts.v.v0.type	= LCB_IO_OPS_DEFAULT;
+	}
+	err = lcb_create_io_ops(&create_options.v.v0.io, &io_opts);
+	if (err != LCB_SUCCESS) {
+		lua_pushboolean( L, 0 );											// +1
+		lua_pushfstring( L, "IO Ops failure %s", lcb_strerror(NULL,err));	// +1
+		return 2;
 	}
 
 	create_options.v.v0.host	= specStr;
@@ -941,7 +981,8 @@ static int Connect(lua_State *L) {
 	if (!pinstance) {
 		return luaL_error(L, "Failed to allocate instance pointer");	
 	}
-	pinstance->valid = 0;
+	pinstance->evbase	= evbase;
+	pinstance->valid	= 0;
 
 	luaL_getmetatable(L, TYPENAME);								// +1
 	lua_setmetatable(L, -2);									// -1
@@ -952,6 +993,9 @@ static int Connect(lua_State *L) {
 		lua_pushfstring( L, "Connection CREATE failure %s", lcb_strerror(NULL,err)); // +1
 		return 2;
 	}
+	
+	lcb_set_cookie( pinstance->inst, pinstance );
+
     
 	(void)lcb_set_error_callback		( pinstance->inst, error_cb		);
 
@@ -970,26 +1014,60 @@ static int Connect(lua_State *L) {
     (void)lcb_set_stat_callback			( pinstance->inst, stat_cb		);
     (void)lcb_set_touch_callback		( pinstance->inst, touch_cb		);
     (void)lcb_set_flush_callback		( pinstance->inst, flush_cb		);
+	(void)lcb_set_configuration_callback( pinstance->inst, config_cb	);
+	
+	pinstance->valid = 1;
 
-	err = lcb_wait( pinstance->inst );
-	if ( err != LCB_SUCCESS ) {
-		lua_pushboolean( L, 0 );										// +1
-		lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
-		return 2;
+	if (pinstance->evbase == NULL ) {
+		err = lcb_wait( pinstance->inst );
+		if ( err != LCB_SUCCESS ) {
+			lua_pushboolean( L, 0 );										// +1
+			lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
+			return 2;
+		}
+	}
+	else {
+		// loop the events until everything is done, have config mark us active
+		int ret = 0;
+		do {
+			ret = event_base_loop( pinstance->evbase, EVLOOP_ONCE );
+			if (ret != 0) {
+				lua_pushboolean( L, 0 );
+				lua_pushfstring( L, "Event loop error");
+				return 2;
+			}
+		} while (!pinstance->connected);
+
+		err = lcb_get_last_error(pinstance->inst);
+		if ( err != LCB_SUCCESS ) {
+			lua_pushboolean( L, 0 );										// +1
+			lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
+			return 2;
+		}
 	}
 
-	pinstance->valid = 1;
 	return 1; // return pinstance
 }
 
 static int __gc(lua_State *L) {
 	Instance *pinstance	= NULL;
 	pinstance = (Instance*)luaL_checkudata(L, 1, TYPENAME);
+	
+	if (pinstance->evbase) {
+		event_base_free( pinstance->evbase );
+		pinstance->evbase = NULL;
+	}
 
 	if (pinstance->valid) {
 		pinstance->valid = 0;
 		lcb_destroy( pinstance->inst );
 	}
+
+	if (pinstance->ioopts) {
+		lcb_destroy_io_ops( pinstance->ioopts );
+		pinstance->ioopts = NULL;
+	}
+
 	return 0;	
 }
 
