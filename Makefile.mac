@@ -2,7 +2,7 @@ INCLUDE=-I/usr/include -I/usr/local/openresty/luajit/include -I./
 LIBDIR=-L/usr/local/lib -L/usr/local/openresty/luajit/lib
 
 CC=gcc
-LIBS=-lcouchbase
+LIBS=-lcouchbase -levent
 COPTS=-ggdb -c -fno-common
 LOPTS=-bundle -undefined dynamic_lookup
 

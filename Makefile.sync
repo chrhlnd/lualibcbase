@@ -2,22 +2,21 @@ INCLUDE=-I/usr/include -I/usr/local/openresty/luajit/include -I./
 LIBDIR=-L/usr/lib64 -L/usr/local/openresty/luajit/lib
 
 CC=gcc
-LIBS=-llua -lcouchbase -l:libevent-1.4.so.2
-#COPTS=-c -fpic -ggdb
-COPTS=-c -fpic -O2
+OPTS=-c -fpic -DSYNC_ONLY -ggdb
 LOPTS=-shared
+LIBS=-llua -lcouchbase
 
 sources:=$(shell find ./ -name "*.c")
 objs:=$(patsubst %.c, %.o, $(sources))
 
 %.o: %.c
-	$(CC) $(OPTS) $(COPTS) $(LIBDIR) $(INCLUDE) $< -o $@
+	$(CC) $(OPTS) $(COPTS) $(INCLUDE) $< -o $@
 
-libcbase.so: $(objs)
+libcbasesync.so: $(objs)
 	$(CC) $(LOPTS) $(LIBDIR) $(LIBS) $(objs) -o $@
 
 clean:
 	rm $(shell ls *.o)
 
-all: clean libcbase.so
+all: clean libcbasesync.so
 
