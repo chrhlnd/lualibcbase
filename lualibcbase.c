@@ -427,6 +427,10 @@ static void error_cb(lcb_t instance,
 					   lcb_error_t error,
 					   const char *errinfo)
 {
+  int five = 5;
+  if (error != LCB_SUCCESS) {
+    const char* err = errinfo;
+  }
 }
     
 /**
@@ -884,7 +888,9 @@ static int Wait(lua_State *L) {
 		return luaL_error(L, "Invalid instance data");	
 	}
 
+#ifndef SYNC_ONLY
 	if (pinstance->evbase == NULL) {
+#endif
 		err = lcb_wait( pinstance->inst );
 		if ( err != LCB_SUCCESS ) {
 			lua_pushboolean( L, 0 );										// +1
@@ -893,10 +899,12 @@ static int Wait(lua_State *L) {
 		}
 		lua_pushboolean( L, 1 );										// +1
 		return 1;
+#ifndef SYNC_ONLY
 	}
-	else {
+	else
+  {
 		int eret = event_base_loop( pinstance->evbase, EVLOOP_NONBLOCK);
-		if (eret != 0) {
+		if (eret < 0) {
 			lua_pushboolean( L, 0 );
 			lua_pushstring( L, "event loop error in wait" );
 			return 2;
@@ -910,6 +918,8 @@ static int Wait(lua_State *L) {
 		lua_pushboolean( L, 1 );										// +1
 		return 1;
 	}
+#endif
+
 }
 	
 static void config_cb(lcb_t instance, lcb_configuration_t config) {
@@ -942,6 +952,7 @@ static int Connect(lua_State *L) {
 	struct lcb_create_io_ops_st io_opts;
 	struct lcb_create_st create_options;
 	memset(&create_options, 0, sizeof(create_options));
+	memset(&io_opts, 0, sizeof(io_opts));
 	
 	top = lua_gettop(L);
 
@@ -957,32 +968,45 @@ static int Connect(lua_State *L) {
 
 
 	io_opts.version = 0;
+
+#ifndef SYNC_ONLY
 	if (nonblock) {
 		evbase = event_base_new();
 		io_opts.v.v0.type	= LCB_IO_OPS_LIBEVENT;
 		io_opts.v.v0.cookie	= evbase;
 	}
-	else {
+	else
+#endif
+	{
 		io_opts.v.v0.type	= LCB_IO_OPS_DEFAULT;
 	}
-	err = lcb_create_io_ops(&create_options.v.v0.io, &io_opts);
+
+	lcb_io_opt_t ioops;
+	err = lcb_create_io_ops(&ioops, &io_opts);
 	if (err != LCB_SUCCESS) {
 		lua_pushboolean( L, 0 );											// +1
 		lua_pushfstring( L, "IO Ops failure %s", lcb_strerror(NULL,err));	// +1
 		return 2;
 	}
 
-	create_options.v.v0.host	= specStr;
-	create_options.v.v0.user	= userStr;
+	create_options.v.v0.host    = specStr;
+	create_options.v.v0.user    = userStr;
 	create_options.v.v0.passwd	= passStr;
 	create_options.v.v0.bucket	= bucketStr;
+#ifndef SYNC_ONLY
+  create_options.v.v0.io      = ioops;
+#endif
 
 	pinstance = lua_newuserdata( L, sizeof(*pinstance) );				// +1
+	// THIS is random memory in nginx
 	if (!pinstance) {
 		return luaL_error(L, "Failed to allocate instance pointer");	
 	}
+	memset( pinstance, 0, sizeof(*pinstance));
 	pinstance->evbase	= evbase;
-	pinstance->valid	= 0;
+#ifndef SYNC_ONLY
+  pinstance->ioopts = ioops;
+#endif
 
 	luaL_getmetatable(L, TYPENAME);								// +1
 	lua_setmetatable(L, -2);									// -1
@@ -995,9 +1019,10 @@ static int Connect(lua_State *L) {
 	}
 	
 	lcb_set_cookie( pinstance->inst, pinstance );
+  (void)lcb_set_configuration_callback( pinstance->inst, config_cb	);
 
     
-	(void)lcb_set_error_callback		( pinstance->inst, error_cb		);
+	(void)lcb_set_error_callback    		( pinstance->inst, error_cb		);
 
 	err = lcb_connect( pinstance->inst );
 	if (err != LCB_SUCCESS) {
@@ -1006,35 +1031,40 @@ static int Connect(lua_State *L) {
 		return 2;
 	}
 	
-	(void)lcb_set_get_callback			( pinstance->inst, get_cb		);
-	(void)lcb_set_touch_callback		( pinstance->inst, touch_cb		);
-	(void)lcb_set_store_callback		( pinstance->inst, store_cb		);
-    (void)lcb_set_arithmetic_callback	( pinstance->inst, arith_cb		);
-    (void)lcb_set_remove_callback		( pinstance->inst, remove_cb	);
-    (void)lcb_set_stat_callback			( pinstance->inst, stat_cb		);
-    (void)lcb_set_touch_callback		( pinstance->inst, touch_cb		);
-    (void)lcb_set_flush_callback		( pinstance->inst, flush_cb		);
-	(void)lcb_set_configuration_callback( pinstance->inst, config_cb	);
+  (void)lcb_set_get_callback			( pinstance->inst, get_cb		);
+  (void)lcb_set_touch_callback		( pinstance->inst, touch_cb		);
+  (void)lcb_set_store_callback		( pinstance->inst, store_cb		);
+  (void)lcb_set_arithmetic_callback	( pinstance->inst, arith_cb		);
+  (void)lcb_set_remove_callback		( pinstance->inst, remove_cb	);
+  (void)lcb_set_stat_callback			( pinstance->inst, stat_cb		);
+  (void)lcb_set_touch_callback		( pinstance->inst, touch_cb		);
+  (void)lcb_set_flush_callback		( pinstance->inst, flush_cb		);
 	
 	pinstance->valid = 1;
 
+#ifndef SYNC_ONLY
 	if (pinstance->evbase == NULL ) {
+#endif
 		err = lcb_wait( pinstance->inst );
 		if ( err != LCB_SUCCESS ) {
 			lua_pushboolean( L, 0 );										// +1
 			lua_pushfstring( L, "Error %s", lcb_strerror(NULL,err)); // +1
 			return 2;
 		}
+#ifndef SYNC_ONLY
 	}
 	else {
 		// loop the events until everything is done, have config mark us active
 		int ret = 0;
 		do {
 			ret = event_base_loop( pinstance->evbase, EVLOOP_ONCE );
-			if (ret != 0) {
+			if (ret < 0) {
 				lua_pushboolean( L, 0 );
 				lua_pushfstring( L, "Event loop error");
 				return 2;
+			}
+			if (ret > 0 ) {
+			//CMH some kind of timing issue with the config call assume connection
 			}
 		} while (!pinstance->connected);
 
@@ -1045,6 +1075,7 @@ static int Connect(lua_State *L) {
 			return 2;
 		}
 	}
+#endif
 
 	return 1; // return pinstance
 }
@@ -1053,10 +1084,12 @@ static int __gc(lua_State *L) {
 	Instance *pinstance	= NULL;
 	pinstance = (Instance*)luaL_checkudata(L, 1, TYPENAME);
 	
+#ifndef SYNC_ONLY
 	if (pinstance->evbase) {
 		event_base_free( pinstance->evbase );
 		pinstance->evbase = NULL;
 	}
+#endif
 
 	if (pinstance->valid) {
 		pinstance->valid = 0;
@@ -1551,8 +1584,13 @@ static int setupFlush(lua_State* L) {
 	lua_pop(L,1);
 }
 
+#ifdef SYNC_ONLY
+#define MAIN luaopen_libcbasesync
+#else
+#define MAIN luaopen_libcbase
+#endif
 
-LUA_API int luaopen_libcbase(lua_State *L) {
+LUA_API int MAIN (lua_State *L) {
 	luaL_newmetatable(L, TYPENAME); // + 1
 	lua_pushliteral(L, "__gc");      // + 1
 	lua_pushcfunction(L, __gc);     // + 1
