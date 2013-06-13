@@ -40,7 +40,7 @@ You can run it in SYNC or ASYNC mode. In SYNC mode Wait blocks until all Pending
 
 All commands can be batched, just issue multiple full sets of parameters to the call
 
-IE libcbase.store( conn, 'cas',  key1, value1, flags1, cas1, timeout1
+IE libcbase.store( conn, 'cas',  key1, value1, flags1, cas1, timeout1\n
 						'set', key2, value2, flags2, cas2, timeout2
 						'add', key3, value3, flags3, cas3, timeout3
 						....
