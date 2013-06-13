@@ -53,7 +53,7 @@ IE
 The response object returned will responsed with each key's response data through iterate.
 
 Things need to do to be proper:
-	[]	Finish implementing TOUCH/STATS maybe look at the rest api stuff
-	[]	Make proper build path
-	[]	Adjust allocation strategy
+ - []	Finish implementing TOUCH/STATS maybe look at the rest api stuff
+ - []	Make proper build path
+ - []	Adjust allocation strategy
 
