@@ -1480,7 +1480,7 @@ static int __res_flush_errorstr(lua_State *L) {
 // ----------------- FLUSH
 // ------------------------------------------------
 
-static const struct luaL_reg luaLibCBase[] = {
+static const struct luaL_Reg luaLibCBase[] = {
 	{ "connect", Connect },	// connect to a couchbase cluster and returning light user data for the connection
 	{ "wait", Wait },
 	{ "get", Get },
@@ -1620,7 +1620,11 @@ LUA_API int MAIN (lua_State *L) {
 	setupRemove(L);
 	setupFlush(L);
 
+#if LUA_VERSION_NUM < 502
 	luaL_register(L, "libcbase", luaLibCBase);
+#else
+	luaL_newlib(L, luaLibCBase);
+#endif
 
 	return 1;
 }
